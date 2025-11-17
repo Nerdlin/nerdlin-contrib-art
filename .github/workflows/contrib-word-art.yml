@@ -1,0 +1,32 @@
+name: Contrib Word Art
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Every Sunday at 03:10 UTC
+    - cron: '10 3 * * 0'
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Render NERDLIN onto contributions
+        env:
+          # Replace <username> with your GitHub username or use a verified email
+          AUTHOR_NAME: Nerdlin
+          AUTHOR_EMAIL: nerdlin@users.noreply.github.com
+        run: |
+          git config user.name "$AUTHOR_NAME"
+          git config user.email "$AUTHOR_EMAIL"
+          python -m pip install --upgrade pip
+          python scripts/contrib_word_art.py --apply --push --intensity 6 --name "$AUTHOR_NAME" --email "$AUTHOR_EMAIL"
