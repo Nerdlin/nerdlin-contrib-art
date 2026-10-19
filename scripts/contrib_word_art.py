@@ -7,11 +7,12 @@ How it works
  - Commits are authored with backdated GIT_AUTHOR_DATE/GIT_COMMITTER_DATE so they appear on the heatmap.
 
 Usage (locally):
-  python scripts/contrib_word_art.py --apply --push --intensity 6 --name "Nerdlin" --email "<your_email_or_noreply>"
+  python scripts/contrib_word_art.py --apply --push --intensity 60 --name "Nerdlin" --email "<ID>+<username>@users.noreply.github.com"
 
 Notes
  - Commits count only if the author email is linked to your GitHub account. You can use the noreply email:
-   <username>@users.noreply.github.com
+   <ID>+<username>@users.noreply.github.com
+ - The history is rebuilt from scratch on every run (no smearing); --push force-pushes it.
  - The contributions board shows only the last 52 weeks, so we schedule this weekly to keep the word visible.
  - Run inside a dedicated repo (public recommended). Enable "Include private contributions" if using private.
 """
@@ -22,7 +23,6 @@ import argparse
 import datetime as dt
 import os
 import subprocess
-from pathlib import Path
 
 
 # 5x7 font (columns width=5, rows height=7, '1' = filled, '0' = empty)
@@ -136,41 +136,42 @@ def plan_dates(canvas):
 
 
 def run(cmd, **kwargs):
-    return subprocess.check_call(cmd, shell=True, **kwargs)
+    return subprocess.check_call(cmd, **kwargs)
 
 
-def make_commit_for_date(
-    the_date: dt.date,
-    author_name: str,
-    author_email: str,
-    message: str,
-    file_path: Path,
-    allow_empty: bool = False,
-):
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    with file_path.open("a", encoding="utf-8") as f:
-        f.write(f"{the_date.isoformat()} - {message}\n")
+def build_history(dates, intensity, name, email, word, branch):
+    """Rebuild the branch from scratch as an orphan history via git fast-import.
 
-    run(f"git add {file_path.as_posix()}")
-
-    env = os.environ.copy()
-    # Noon UTC for determinism
-    date_str = f"{the_date.isoformat()} 12:00:00 +0000"
-    env.update(
-        {
-            "GIT_AUTHOR_DATE": date_str,
-            "GIT_COMMITTER_DATE": date_str,
-            "GIT_AUTHOR_NAME": author_name,
-            "GIT_AUTHOR_EMAIL": author_email,
-            "GIT_COMMITTER_NAME": author_name,
-            "GIT_COMMITTER_EMAIL": author_email,
-        }
-    )
-
-    allow = " --allow-empty" if allow_empty else ""
-    run(
-        f'git commit -m "contrib-art: {message} ({the_date.isoformat()})"{allow}',
-        env=env,
+    Re-rendering on top of old commits makes the word smear: the window moves
+    one column per week, so every run would add a shifted copy. Rebuilding the
+    history each time keeps exactly one copy of the word.
+    """
+    stream = []
+    mark = 0
+    readme = f"Contribution word art: {word}\nHistory is rebuilt by scripts/contrib_word_art.py\n"
+    for d in sorted(dates):
+        ts = int(dt.datetime(d.year, d.month, d.day, 12, tzinfo=dt.timezone.utc).timestamp())
+        for _ in range(intensity):
+            mark += 1
+            msg = f"contrib-art: {word} pixel ({d.isoformat()})"
+            ident = f"{name} <{email}> {ts} +0000"
+            stream.append(f"commit refs/heads/{branch}")
+            stream.append(f"mark :{mark}")
+            stream.append(f"author {ident}")
+            stream.append(f"committer {ident}")
+            stream.append(f"data {len(msg.encode())}")
+            stream.append(msg)
+            if mark > 1:
+                stream.append(f"from :{mark - 1}")
+            else:
+                stream.append(f"M 100644 inline README.md")
+                stream.append(f"data {len(readme.encode())}")
+                stream.append(readme)
+            stream.append("")
+    subprocess.run(
+        ["git", "fast-import", "--quiet", "--force"],
+        input="\n".join(stream).encode(),
+        check=True,
     )
 
 
@@ -186,20 +187,25 @@ def main():
     p.add_argument(
         "--intensity",
         type=int,
-        default=6,
-        help="Commits per lit cell (4-10 recommended)",
+        default=60,
+        help="Commits per lit cell (must outweigh your normal daily activity)",
     )
     p.add_argument(
-        "--apply", action="store_true", help="Create commits instead of dry-run"
+        "--apply", action="store_true", help="Build the history instead of dry-run"
     )
-    p.add_argument("--push", action="store_true", help="Push after committing")
+    p.add_argument(
+        "--push", action="store_true", help="Force-push the rebuilt history"
+    )
     p.add_argument("--name", default="Nerdlin", help="Author name to use for commits")
     p.add_argument(
         "--email",
         required=False,
-        help="Author email (use your verified or <username>@users.noreply.github.com)",
+        help="Author email (ID+<username>@users.noreply.github.com)",
     )
-    p.add_argument("--file", default="art/log.txt", help="File to touch for commits")
+    p.add_argument("--branch", default="art-build", help="Local branch to build")
+    p.add_argument(
+        "--target", default="main", help="Remote branch to overwrite on --push"
+    )
     args = p.parse_args()
 
     canvas = compose_word(args.word)
@@ -215,18 +221,11 @@ def main():
     if not author_email:
         raise SystemExit("--email is required (or set GIT_AUTHOR_EMAIL)")
 
-    # Ensure repo
-    run("git rev-parse --is-inside-work-tree >NUL 2>&1")
-
-    path = Path(args.file)
-    for d in dates:
-        for k in range(args.intensity):
-            make_commit_for_date(
-                d, args.name, author_email, message=f"{args.word} pixel", file_path=path
-            )
+    run(["git", "rev-parse", "--is-inside-work-tree"], stdout=subprocess.DEVNULL)
+    build_history(dates, args.intensity, args.name, author_email, args.word, args.branch)
 
     if args.push:
-        run("git push")
+        run(["git", "push", "--force", "origin", f"{args.branch}:{args.target}"])
 
 
 if __name__ == "__main__":

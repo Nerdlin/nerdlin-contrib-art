@@ -14,6 +14,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -22,11 +25,11 @@ jobs:
 
       - name: Render NERDLIN onto contributions
         env:
-          # Replace <username> with your GitHub username or use a verified email
+          # Format: <ID>+<username>@users.noreply.github.com
           AUTHOR_NAME: Nerdlin
-          AUTHOR_EMAIL: nerdlin@users.noreply.github.com
+          AUTHOR_EMAIL: 180521143+Nerdlin@users.noreply.github.com
         run: |
           git config user.name "$AUTHOR_NAME"
           git config user.email "$AUTHOR_EMAIL"
           python -m pip install --upgrade pip
-          python scripts/contrib_word_art.py --apply --push --intensity 6 --name "$AUTHOR_NAME" --email "$AUTHOR_EMAIL"
+          python scripts/contrib_word_art.py --apply --push --intensity 60 --name "$AUTHOR_NAME" --email "$AUTHOR_EMAIL"
